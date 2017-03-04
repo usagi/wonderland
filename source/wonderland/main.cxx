@@ -1,4 +1,4 @@
-#define DISABLE_USAGI_LOG_EASY_LOGGER
+//#define DISABLE_USAGI_LOG_EASY_LOGGER
 
 #include "wonderland_type.hxx"
 
@@ -104,11 +104,22 @@ namespace
     
       auto get_name() -> std::string override { return ai.author + "/" + ai.name; }
       
-      auto pay_ante( const size_t, const size_t minimum, const size_t ) -> size_t override
+      auto pay_ante( const size_t my_chips, const size_t minimum, const size_t maximum ) -> size_t override
       {
         try
         {
-          return get_value_as< size_t >( darty_js_from_string( ai.code, "pay_ante" ) );
+          return
+            get_value_as< size_t >
+            ( darty_js_from_string
+              ( ai.code
+              , "pay_ante"
+              , make_object_value
+                ( "my_chips", my_chips
+                , "minimum" , minimum
+                , "maximum" , maximum
+                )
+              )
+            );
         }
         catch ( ... )
         { }
@@ -198,10 +209,15 @@ auto main
   std::mutex ais_mutex;
   
   {
-    auto s = http::server_type::make_unique( 55555, "127.0.0.1" );
+    cmdline::parser p;
+    p.add< int    >( "port"   , 'p', "HTTPd port number", false, 55555, cmdline::range( 1, 65535 ) );
+    p.add< string >( "address", 'a', "bind address; if you need wildcard then set 127.0.0.1", false, "127.0.0.1" );
+    p.parse_check( count_of_parameters, parameters );
     
-    s->only_localhost = true;
+    auto s = http::server_type::make_unique( p.get< int >( "port" ), p.get< string >( "address" ) );
     
+    s->only_localhost = false;
+    /*
     s->add_handler
     ( // path
       "/exit"
@@ -215,7 +231,7 @@ auto main
         return { { { "content-type"s, "text/plain"s } }, "exit"s };
       }
     );
-    
+    */
     const auto make_ranking =
       [&]
       {
@@ -241,6 +257,70 @@ auto main
         return ranking_buffer.str();
       };
     
+    s->add_handler
+    ( // path
+      "/example/nothing-man.js"
+    , [&]
+      ( const auto& method, const auto& path, const auto& headers, const auto& body )
+        mutable
+        -> http::handler_return_type
+      {
+        LOGI << "access /example/nothing-man.js";
+        
+        return 
+          { // headers
+            { { "content-type"s, "application/javascript"s }
+            }
+            // body
+          , u8R"(function get_name()
+{ return "Heart-man" }
+
+function get_author()
+{ return "usagi" }
+
+function pay_ante( params )
+{ return 1 }
+
+function discard_cards( drew_cards )
+{ return [] })"
+          };
+      }
+    );
+    
+    s->add_handler
+    ( // path
+      "/example/heart-man.js"
+    , [&]
+      ( const auto& method, const auto& path, const auto& headers, const auto& body )
+        mutable
+        -> http::handler_return_type
+      {
+        LOGI << "access /example/heart-man.js";
+        
+        return 
+          { // headers
+            { { "content-type"s, "application/javascript"s }
+            }
+            // body
+          , u8R"(function get_name()
+{ return "Heart-man" }
+
+function get_author()
+{ return "usagi" }
+
+function pay_ante( params )
+{
+  return 1
+}
+
+function discard_cards( drew_cards )
+{
+  return drew_cards.filter( function( a ){ return /^[^h][0-9]+$/.test( a ) } )
+})"
+          };
+      }
+    );
+        
     s->add_handler
     ( // path
       "/"
@@ -270,7 +350,8 @@ auto main
   <h2>tips</h2>
   <ul>
     <li style="color:red">謎のバグがあり、コードが大きいと送信をぽちってから1分以上待っても終わらない事があります。その場合もたいてい数秒待てばエラーが無い限りエントリー完了していますので、一旦ESCキーでリクエストを中止するなどした後、別タブでトップページを開いてランキングに追加されていないか確認してみるなどお願いします＞＜</li>
-    <li>サンプルのAIコードはこちら → 1. <a href="">Nothing-man</a> 2. <a href="">usagi/Hart-man</a></li>
+    <li>コードは ASCII 文字のみでお願いします。（ 試作の手抜き実装の仕様上の誤動作が懸念されるため ）</li>
+    <li>サンプルのAIコードはこちら → 1. <a href="/example/nothing-man.js">Nothing-man</a> 2. <a href="/example/heart-man.js">usagi/Hart-man</a></li>
     <li>name は他の方と被らないものをヒューマンブレインでチョイスをお願いします。</li>
     <li>name と author は [a-zA-Z][0-9][-_]+ でお願いします。</li>
     <li>get_name と get_author の結果が同じ AI を投稿すると update 動作になります。</li>
@@ -541,6 +622,10 @@ auto main
 </article>
 <article>
   <h2>Result</h2>
+  <article>
+    <h3>Chips</h3>
+    <p> )"s + to_string( chips ) + u8R"( [chips]</p>
+  </article>
   <article>
     <h3>Rank</h3>
     <p> )"s + to_string( rank ) + u8R"( 位 （ 現在 )"s + to_string( ais.size() ) + u8R"( の AI が登録されています。 ）</p>
